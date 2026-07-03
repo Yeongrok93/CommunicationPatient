@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -28,6 +28,60 @@ export default function Home() {
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationRef = useRef<number | null>(null);
+
+  function drawWaveform() {
+    const canvas = canvasRef.current;
+    const analyser = analyserRef.current;
+    if (!canvas || !analyser) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const bufferLength = analyser.fftSize;
+    const dataArray = new Uint8Array(bufferLength);
+
+    const render = () => {
+      analyser.getByteTimeDomainData(dataArray);
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#2563eb";
+      ctx.beginPath();
+
+      const sliceWidth = canvas.width / bufferLength;
+      let x = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        const v = dataArray[i] / 128.0;
+        const y = (v * canvas.height) / 2;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+        x += sliceWidth;
+      }
+      ctx.lineTo(canvas.width, canvas.height / 2);
+      ctx.stroke();
+
+      animationRef.current = requestAnimationFrame(render);
+    };
+    render();
+  }
+
+  function stopWaveform() {
+    if (animationRef.current !== null) {
+      cancelAnimationFrame(animationRef.current);
+      animationRef.current = null;
+    }
+    audioContextRef.current?.close();
+    audioContextRef.current = null;
+    analyserRef.current = null;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  useEffect(() => stopWaveform, []);
 
   async function startRecording() {
     setError(null);
@@ -35,11 +89,21 @@ export default function Home() {
     const recorder = new MediaRecorder(stream);
     chunksRef.current = [];
 
+    const audioContext = new AudioContext();
+    const source = audioContext.createMediaStreamSource(stream);
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 2048;
+    source.connect(analyser);
+    audioContextRef.current = audioContext;
+    analyserRef.current = analyser;
+    drawWaveform();
+
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunksRef.current.push(e.data);
     };
     recorder.onstop = () => {
       stream.getTracks().forEach((t) => t.stop());
+      stopWaveform();
       const blob = new Blob(chunksRef.current, { type: recorder.mimeType });
       submitTurn(blob);
     };
@@ -168,6 +232,17 @@ export default function Home() {
         </div>
 
         {error && <p className="text-sm text-red-500">{error}</p>}
+
+        <canvas
+          ref={canvasRef}
+          width={600}
+          height={80}
+          className={`w-full rounded-lg border bg-white dark:bg-zinc-900 transition-opacity ${
+            recording
+              ? "border-blue-400 dark:border-blue-700 opacity-100"
+              : "border-zinc-200 dark:border-zinc-800 opacity-40"
+          }`}
+        />
 
         <div className="flex gap-3">
           <button
