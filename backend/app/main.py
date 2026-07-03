@@ -13,7 +13,10 @@ app = FastAPI(title="communication-mic backend")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # 배포 후 Vercel 도메인 추가 예정
+    allow_origins=[
+        "http://localhost:3000",
+        "https://communication-patient.vercel.app",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
