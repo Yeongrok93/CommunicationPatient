@@ -85,7 +85,20 @@ export default function Home() {
 
   async function startRecording() {
     setError(null);
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      const name = e instanceof DOMException ? e.name : "Unknown";
+      const messages: Record<string, string> = {
+        NotAllowedError: "마이크 권한이 거부되었습니다. 주소창 왼쪽 자물쇠 아이콘 → 사이트 설정에서 마이크를 허용해주세요.",
+        NotFoundError: "마이크 장치를 찾을 수 없습니다. 마이크가 연결되어 있는지 확인해주세요.",
+        NotReadableError: "다른 프로그램(Zoom, Discord 등)이 마이크를 사용 중일 수 있습니다. 다른 프로그램을 종료하고 다시 시도해주세요.",
+        SecurityError: "보안 컨텍스트(HTTPS)가 아니어서 마이크를 사용할 수 없습니다.",
+      };
+      setError(messages[name] ?? `마이크 접근 실패: ${name}`);
+      return;
+    }
     const recorder = new MediaRecorder(stream);
     chunksRef.current = [];
 
