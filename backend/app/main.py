@@ -25,7 +25,7 @@ TMP_DIR = os.path.join(tempfile.gettempdir(), "comm_mic_audio")
 os.makedirs(TMP_DIR, exist_ok=True)
 
 
-@app.get("/api/health")
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 def health():
     return {"status": "ok"}
 
