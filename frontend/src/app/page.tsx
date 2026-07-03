@@ -64,7 +64,10 @@ export default function Home() {
       form.append("history", JSON.stringify(claudeHistory));
 
       const res = await fetch(`${API_URL}/api/turn`, { method: "POST", body: form });
-      if (!res.ok) throw new Error(`서버 오류 (${res.status})`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.detail ?? `서버 오류 (${res.status})`);
+      }
       const data = await res.json();
 
       setTurns((prev) => [

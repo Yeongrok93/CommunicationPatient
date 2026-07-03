@@ -3,7 +3,7 @@ import os
 import tempfile
 import uuid
 
-from fastapi import FastAPI, Form, UploadFile
+from fastapi import FastAPI, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -43,6 +43,12 @@ async def turn(
 
     try:
         stt_result = whisper_stt.transcribe(wav_path)
+        if not stt_result["text"].strip():
+            raise HTTPException(
+                status_code=422,
+                detail="음성이 인식되지 않았습니다. 마이크에 더 가까이서, 좀 더 길게 말씀해주세요.",
+            )
+
         prosody_result = prosody.analyze_prosody(wav_path, stt_result["word_count"])
         prosody_summary_kr = llm.summarize_prosody_kr(prosody_result)
 
