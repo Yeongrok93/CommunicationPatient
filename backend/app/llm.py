@@ -16,6 +16,9 @@ PATIENT_SYSTEM_PROMPT = """\
 아래 환자 설정에 맞게, 딱 그 환자로서만 자연스럽게 대답하세요.
 의료 지식을 가르치거나 학습자를 평가하는 발언은 절대 하지 마세요(그건 별도 코치가 합니다).
 
+실제 환자가 짧게 구어체로 대답하듯, 1~2문장 이내로 짧게 대답하세요.
+지문/행동 묘사(예: *배를 만지며*, *한숨을 쉬며*)나 이모지는 쓰지 마세요 — 이 응답은 음성으로 그대로 읽힙니다.
+
 [환자 설정]
 {persona}
 """
@@ -86,7 +89,7 @@ def generate_patient_reply(persona: str, history: list[dict], user_text: str) ->
     messages = history + [{"role": "user", "content": user_text}]
     response = client.messages.create(
         model=MODEL,
-        max_tokens=300,
+        max_tokens=120,
         thinking={"type": "disabled"},
         system=PATIENT_SYSTEM_PROMPT.format(persona=persona),
         messages=messages,

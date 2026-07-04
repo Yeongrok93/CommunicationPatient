@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 import os
@@ -51,15 +52,17 @@ async def turn(
             )
 
         prosody_result = prosody.analyze_prosody(wav_path, stt_result["word_count"])
-        scores = llm.score_turn(stt_result["text"], prosody_result)
-
         parsed_history = json.loads(history)
-        patient_reply = llm.generate_patient_reply(
-            persona, parsed_history, stt_result["text"]
+
+        # 채점(Haiku)과 환자 응답 생성(Sonnet)은 서로 의존성이 없어 동시에 실행
+        scores, patient_reply = await asyncio.gather(
+            asyncio.to_thread(llm.score_turn, stt_result["text"], prosody_result),
+            asyncio.to_thread(
+                llm.generate_patient_reply, persona, parsed_history, stt_result["text"]
+            ),
         )
-        patient_audio_b64 = base64.b64encode(
-            tts.synthesize_speech(patient_reply)
-        ).decode("ascii")
+        patient_audio_bytes = await asyncio.to_thread(tts.synthesize_speech, patient_reply)
+        patient_audio_b64 = base64.b64encode(patient_audio_bytes).decode("ascii")
 
         updated_history = parsed_history + [
             {"role": "user", "content": stt_result["text"]},
