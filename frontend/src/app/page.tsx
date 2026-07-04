@@ -10,52 +10,29 @@ const DEFAULT_PERSONA = `45세 남성 환자. 3일 전부터 시작된 상복부
 
 type ClaudeMessage = { role: "user" | "assistant"; content: string };
 
-type Prosody = {
-  duration_sec: number;
-  f0_mean_hz: number | null;
-  f0_std_hz: number | null;
-  intensity_mean_db: number;
-  pause_count: number;
-  total_pause_sec: number;
-  longest_pause_sec: number;
-  words_per_minute: number;
+type Scores = {
+  speech_rate_score: number;
+  speech_rate_comment: string;
+  fluency_score: number;
+  fluency_comment: string;
+  empathy_score: number;
+  empathy_comment: string;
 };
 
-type ProsodyItem = { label: string; value: string; attention: boolean };
+type ScoreItem = { label: string; score: number; comment: string };
 
 type ChatTurn = {
   role: "user" | "assistant";
   text: string;
-  prosody?: Prosody;
+  scores?: Scores;
 };
 
-function prosodyItems(p: Prosody): ProsodyItem[] {
-  const items: ProsodyItem[] = [];
-
-  const wpm = p.words_per_minute;
-  items.push({
-    label: "말속도",
-    value: `${wpm.toFixed(0)} 단어/분${wpm > 170 ? " · 빠른 편" : wpm > 0 && wpm < 90 ? " · 느린 편" : ""}`,
-    attention: wpm > 170 || (wpm > 0 && wpm < 90),
-  });
-
-  if (p.f0_std_hz !== null) {
-    const monotone = p.f0_std_hz < 15;
-    items.push({
-      label: "억양 변화",
-      value: `${p.f0_std_hz.toFixed(1)}Hz${monotone ? " · 단조로움" : ""}`,
-      attention: monotone,
-    });
-  }
-
-  const longPause = p.longest_pause_sec > 2.5;
-  items.push({
-    label: "침묵",
-    value: `${p.pause_count}회 · 최장 ${p.longest_pause_sec.toFixed(1)}초${longPause ? " · 긴 침묵" : ""}`,
-    attention: longPause,
-  });
-
-  return items;
+function scoreItems(s: Scores): ScoreItem[] {
+  return [
+    { label: "말속도", score: s.speech_rate_score, comment: s.speech_rate_comment },
+    { label: "유창성", score: s.fluency_score, comment: s.fluency_comment },
+    { label: "공감", score: s.empathy_score, comment: s.empathy_comment },
+  ];
 }
 
 export default function Home() {
@@ -74,6 +51,7 @@ export default function Home() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationRef = useRef<number | null>(null);
+  const playbackRef = useRef<HTMLAudioElement | null>(null);
 
   function drawWaveform() {
     const canvas = canvasRef.current;
@@ -124,6 +102,15 @@ export default function Home() {
   }
 
   useEffect(() => stopWaveform, []);
+
+  function playPatientAudio(base64Mp3: string) {
+    playbackRef.current?.pause();
+    const audio = new Audio(`data:audio/mp3;base64,${base64Mp3}`);
+    playbackRef.current = audio;
+    audio.play().catch(() => {
+      // 자동재생이 브라우저 정책에 막히는 경우, 사용자가 다음 상호작용 후 재생됨
+    });
+  }
 
   async function startRecording() {
     setError(null);
@@ -191,10 +178,11 @@ export default function Home() {
 
       setTurns((prev) => [
         ...prev,
-        { role: "user", text: data.transcript, prosody: data.prosody },
+        { role: "user", text: data.transcript, scores: data.scores },
         { role: "assistant", text: data.patient_reply },
       ]);
       setClaudeHistory(data.history);
+      if (data.patient_audio_b64) playPatientAudio(data.patient_audio_b64);
     } catch (e) {
       setError(e instanceof Error ? e.message : "알 수 없는 오류");
     } finally {
@@ -215,9 +203,7 @@ export default function Home() {
         body: JSON.stringify({
           turns: userTurns.map((t) => ({
             transcript: t.text,
-            prosody_summary_kr: t.prosody
-              ? prosodyItems(t.prosody).map((i) => `${i.label}: ${i.value}`).join(" / ")
-              : "",
+            scores: t.scores ?? {},
           })),
         }),
       });
@@ -274,19 +260,20 @@ export default function Home() {
               >
                 {t.text}
               </div>
-              {t.prosody && (
+              {t.scores && (
                 <div className="mt-1.5 flex max-w-[85%] flex-wrap justify-end gap-1.5">
-                  {prosodyItems(t.prosody).map((item, j) => (
+                  {scoreItems(t.scores).map((item, j) => (
                     <span
                       key={j}
-                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium ${
-                        item.attention
+                      title={item.comment}
+                      className={`inline-flex cursor-help items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                        item.score <= 5
                           ? "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
-                          : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+                          : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
                       }`}
                     >
                       <span className="font-semibold">{item.label}</span>
-                      {item.value}
+                      {item.score}/10
                     </span>
                   ))}
                 </div>

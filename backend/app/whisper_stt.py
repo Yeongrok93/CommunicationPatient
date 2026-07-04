@@ -1,12 +1,5 @@
 """OpenAI Whisper API 기반 음성 전사."""
-import os
-
-from dotenv import load_dotenv
-from openai import OpenAI
-
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
-
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+from .openai_client import client
 
 
 def transcribe(wav_path: str) -> dict:

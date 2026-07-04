@@ -1,4 +1,5 @@
-"""Claude API 연동: 가상환자 응답 생성 + 커뮤니케이션 코칭 피드백."""
+"""Claude API 연동: 가상환자 응답 생성 + 발화 채점 + 커뮤니케이션 코칭 피드백."""
+import json
 import os
 
 from anthropic import Anthropic
@@ -8,6 +9,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 MODEL = "claude-sonnet-5"
+SCORE_MODEL = "claude-haiku-4-5"
 
 PATIENT_SYSTEM_PROMPT = """\
 당신은 의대생/간호대생의 의사소통 교육을 위한 가상환자 역할극 배우입니다.
@@ -25,45 +27,55 @@ COACH_SYSTEM_PROMPT = """\
 숫자를 그대로 나열하지 말고, 그 숫자가 실제 대화에서 어떻게 들렸을지 해석해서 말하세요.
 """
 
-# NOTE: 아래 임계값은 문헌 기반 참고치로 잡은 placeholder입니다.
-# 정식 연구 단계에서는 숙련자(교수/SP) baseline 녹음 대비 상대평가로 교체 필요.
-_THRESHOLDS = {
-    "wpm_fast": 170,
-    "wpm_slow": 90,
-    "f0_std_low": 15.0,
-    "pause_interrupt_sec": 0.3,
-    "pause_long_sec": 2.5,
+SCORE_SYSTEM_PROMPT = """\
+당신은 임상 커뮤니케이션 교육 평가자입니다.
+학습자(의료진 역할)가 가상환자에게 한 발화를 아래 세 항목에 대해 1~10점(정수, 10점이 가장 좋음)으로 채점하세요.
+
+- speech_rate: 환자와 대화하기에 적절한 말속도인지 (제공된 말속도 수치를 근거로 판단. 너무 빠르거나 느리면 감점)
+- fluency: 더듬거림, 반복, "음"/"어" 같은 filler word, 부자연스러운 긴 침묵 없이 매끄럽게 말했는지 (발화 텍스트와 침묵 지표를 근거로 판단)
+- empathy: 환자의 감정과 상황을 배려하는 표현을 사용했는지 (발화 내용 자체를 근거로 판단)
+
+각 항목마다 점수와 그 이유를 담은 한 줄 코멘트(한국어)를 반환하세요."""
+
+_SCORE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "speech_rate_score": {"type": "integer"},
+        "speech_rate_comment": {"type": "string"},
+        "fluency_score": {"type": "integer"},
+        "fluency_comment": {"type": "string"},
+        "empathy_score": {"type": "integer"},
+        "empathy_comment": {"type": "string"},
+    },
+    "required": [
+        "speech_rate_score",
+        "speech_rate_comment",
+        "fluency_score",
+        "fluency_comment",
+        "empathy_score",
+        "empathy_comment",
+    ],
+    "additionalProperties": False,
 }
 
 
-def summarize_prosody_kr(p: dict) -> str:
-    notes = []
+def score_turn(transcript: str, prosody: dict) -> dict:
+    """말속도/유창성/공감을 경량 모델(Haiku)로 10점 만점 채점."""
+    prompt = f"""[학습자 발화 텍스트]
+{transcript}
 
-    wpm = p.get("words_per_minute") or 0
-    if wpm > _THRESHOLDS["wpm_fast"]:
-        notes.append(f"말속도가 빠른 편(약 {wpm} 단어/분)")
-    elif 0 < wpm < _THRESHOLDS["wpm_slow"]:
-        notes.append(f"말속도가 느린 편(약 {wpm} 단어/분)")
-    else:
-        notes.append(f"말속도는 무난한 편(약 {wpm} 단어/분)")
-
-    f0_std = p.get("f0_std_hz")
-    if f0_std is not None:
-        if f0_std < _THRESHOLDS["f0_std_low"]:
-            notes.append(f"억양 변화가 적어 다소 단조롭게 들릴 수 있음(F0 표준편차 {f0_std}Hz)")
-        else:
-            notes.append(f"억양 변화가 있는 편(F0 표준편차 {f0_std}Hz)")
-
-    longest_pause = p.get("longest_pause_sec", 0)
-    if longest_pause > _THRESHOLDS["pause_long_sec"]:
-        notes.append(f"가장 긴 침묵이 {longest_pause}초로 다소 길게 끊긴 구간이 있음")
-
-    notes.append(
-        f"총 발화 {p.get('duration_sec')}초 중 무음 구간 {p.get('total_pause_sec')}초"
-        f"(침묵 {p.get('pause_count')}회)"
+[음향 지표]
+말속도: {prosody.get('words_per_minute')} 단어/분
+침묵: {prosody.get('pause_count')}회, 총 {prosody.get('total_pause_sec')}초, 최장 {prosody.get('longest_pause_sec')}초
+"""
+    response = client.messages.create(
+        model=SCORE_MODEL,
+        max_tokens=400,
+        system=SCORE_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": prompt}],
+        output_config={"format": {"type": "json_schema", "schema": _SCORE_SCHEMA}},
     )
-
-    return " / ".join(notes)
+    return json.loads(_extract_text(response))
 
 
 def _extract_text(response) -> str:

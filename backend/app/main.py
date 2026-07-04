@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import tempfile
@@ -7,7 +8,7 @@ from fastapi import FastAPI, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from . import audio_utils, llm, prosody, whisper_stt
+from . import audio_utils, llm, prosody, tts, whisper_stt
 
 app = FastAPI(title="communication-mic backend")
 
@@ -50,12 +51,15 @@ async def turn(
             )
 
         prosody_result = prosody.analyze_prosody(wav_path, stt_result["word_count"])
-        prosody_summary_kr = llm.summarize_prosody_kr(prosody_result)
+        scores = llm.score_turn(stt_result["text"], prosody_result)
 
         parsed_history = json.loads(history)
         patient_reply = llm.generate_patient_reply(
             persona, parsed_history, stt_result["text"]
         )
+        patient_audio_b64 = base64.b64encode(
+            tts.synthesize_speech(patient_reply)
+        ).decode("ascii")
 
         updated_history = parsed_history + [
             {"role": "user", "content": stt_result["text"]},
@@ -67,15 +71,16 @@ async def turn(
     return {
         "transcript": stt_result["text"],
         "prosody": prosody_result,
-        "prosody_summary_kr": prosody_summary_kr,
+        "scores": scores,
         "patient_reply": patient_reply,
+        "patient_audio_b64": patient_audio_b64,
         "history": updated_history,
     }
 
 
 class TurnLog(BaseModel):
     transcript: str
-    prosody_summary_kr: str
+    scores: dict
 
 
 class SessionFeedbackRequest(BaseModel):
@@ -88,8 +93,12 @@ def session_feedback(req: SessionFeedbackRequest):
     combined_transcript = "\n".join(
         f"[{i+1}번째 발화] {t.transcript}" for i, t in enumerate(req.turns)
     )
-    combined_prosody = "\n".join(
-        f"[{i+1}번째 발화] {t.prosody_summary_kr}" for i, t in enumerate(req.turns)
+    combined_scores = "\n".join(
+        f"[{i+1}번째 발화] 말속도 {t.scores.get('speech_rate_score')}/10"
+        f"({t.scores.get('speech_rate_comment')}), "
+        f"유창성 {t.scores.get('fluency_score')}/10({t.scores.get('fluency_comment')}), "
+        f"공감 {t.scores.get('empathy_score')}/10({t.scores.get('empathy_comment')})"
+        for i, t in enumerate(req.turns)
     )
-    feedback = llm.generate_coaching_feedback(combined_transcript, combined_prosody)
+    feedback = llm.generate_coaching_feedback(combined_transcript, combined_scores)
     return {"feedback": feedback}
