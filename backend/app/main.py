@@ -92,7 +92,7 @@ class SessionFeedbackRequest(BaseModel):
 
 @app.post("/api/session-feedback")
 def session_feedback(req: SessionFeedbackRequest):
-    """세션 종료 시 누적 발화를 종합해 코칭 피드백 생성."""
+    """세션 종료 시 누적 발화를 종합해 구조화된 리포트 생성."""
     combined_transcript = "\n".join(
         f"[{i+1}번째 발화] {t.transcript}" for i, t in enumerate(req.turns)
     )
@@ -103,5 +103,4 @@ def session_feedback(req: SessionFeedbackRequest):
         f"공감 {t.scores.get('empathy_score')}/10({t.scores.get('empathy_comment')})"
         for i, t in enumerate(req.turns)
     )
-    feedback = llm.generate_coaching_feedback(combined_transcript, combined_scores)
-    return {"feedback": feedback}
+    return llm.generate_session_report(combined_transcript, combined_scores)

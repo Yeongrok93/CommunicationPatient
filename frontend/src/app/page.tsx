@@ -1,6 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  ChatTurn,
+  RETRY_PERSONA_KEY,
+  REPORT_STORAGE_KEY,
+  Scores,
+  StoredReport,
+} from "@/lib/report";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -10,22 +18,7 @@ const DEFAULT_PERSONA = `45세 남성 환자. 3일 전부터 시작된 상복부
 
 type ClaudeMessage = { role: "user" | "assistant"; content: string };
 
-type Scores = {
-  speech_rate_score: number;
-  speech_rate_comment: string;
-  fluency_score: number;
-  fluency_comment: string;
-  empathy_score: number;
-  empathy_comment: string;
-};
-
 type ScoreItem = { label: string; score: number; comment: string };
-
-type ChatTurn = {
-  role: "user" | "assistant";
-  text: string;
-  scores?: Scores;
-};
 
 function scoreItems(s: Scores): ScoreItem[] {
   return [
@@ -36,13 +29,13 @@ function scoreItems(s: Scores): ScoreItem[] {
 }
 
 export default function Home() {
+  const router = useRouter();
   const [persona, setPersona] = useState(DEFAULT_PERSONA);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [claudeHistory, setClaudeHistory] = useState<ClaudeMessage[]>([]);
   const [recording, setRecording] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sessionFeedback, setSessionFeedback] = useState<string | null>(null);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -52,6 +45,15 @@ export default function Home() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationRef = useRef<number | null>(null);
   const playbackRef = useRef<HTMLAudioElement | null>(null);
+  const sessionStartRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const retryPersona = sessionStorage.getItem(RETRY_PERSONA_KEY);
+    if (retryPersona) {
+      setPersona(retryPersona);
+      sessionStorage.removeItem(RETRY_PERSONA_KEY);
+    }
+  }, []);
 
   function drawWaveform() {
     const canvas = canvasRef.current;
@@ -114,6 +116,8 @@ export default function Home() {
 
   async function startRecording() {
     setError(null);
+    if (sessionStartRef.current === null) sessionStartRef.current = Date.now();
+
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -208,8 +212,21 @@ export default function Home() {
         }),
       });
       if (!res.ok) throw new Error(`서버 오류 (${res.status})`);
-      const data = await res.json();
-      setSessionFeedback(data.feedback);
+      const report = await res.json();
+
+      const durationSec = sessionStartRef.current
+        ? Math.round((Date.now() - sessionStartRef.current) / 1000)
+        : 0;
+
+      const stored: StoredReport = {
+        persona,
+        turns,
+        report,
+        durationSec,
+        createdAt: new Date().toISOString(),
+      };
+      sessionStorage.setItem(REPORT_STORAGE_KEY, JSON.stringify(stored));
+      router.push("/report");
     } catch (e) {
       setError(e instanceof Error ? e.message : "알 수 없는 오류");
     } finally {
@@ -220,8 +237,8 @@ export default function Home() {
   function resetSession() {
     setTurns([]);
     setClaudeHistory([]);
-    setSessionFeedback(null);
     setError(null);
+    sessionStartRef.current = null;
   }
 
   return (
@@ -282,17 +299,6 @@ export default function Home() {
           ))}
           {loading && <p className="text-sm text-zinc-400">분석 중...</p>}
         </div>
-
-        {sessionFeedback && (
-          <div className="rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950 p-4">
-            <h2 className="mb-2 text-sm font-semibold text-blue-900 dark:text-blue-200">
-              종합 코칭 피드백
-            </h2>
-            <p className="whitespace-pre-wrap text-sm leading-relaxed text-blue-950 dark:text-blue-100">
-              {sessionFeedback}
-            </p>
-          </div>
-        )}
       </div>
 
       <div className="fixed inset-x-0 bottom-0 z-10 border-t border-zinc-200 dark:border-zinc-800 bg-white/95 dark:bg-zinc-950/95 backdrop-blur">

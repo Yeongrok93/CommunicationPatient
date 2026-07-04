@@ -23,12 +23,32 @@ PATIENT_SYSTEM_PROMPT = """\
 {persona}
 """
 
-COACH_SYSTEM_PROMPT = """\
+REPORT_SYSTEM_PROMPT = """\
 당신은 임상 커뮤니케이션 교육 코치입니다.
-아래는 학습자가 가상환자에게 한 발화의 전사와 음향(운율) 분석 요약입니다.
-공감, 명료성, 환자 배려 관점에서 2~4문장으로 구체적인 피드백을 한국어로 제공하세요.
-숫자를 그대로 나열하지 말고, 그 숫자가 실제 대화에서 어떻게 들렸을지 해석해서 말하세요.
-"""
+아래는 학습자가 가상환자와 나눈 대화 전체 전사와, 각 발화별 말속도/유창성/공감 점수(10점 만점)입니다.
+세션 전체를 종합해서 JSON으로 반환하세요.
+
+- overall_grade: "good"(양호) / "normal"(보통) / "needs_improvement"(개선 필요) 중 하나
+- overall_comment: 종합 평가를 한 문장으로
+- strengths: 잘한 점 1~3개. 각각 실제 발화 내용을 근거로 구체적으로
+- improvements: 개선하면 좋은 점 1~3개. 각각 실제 발화 내용을 근거로 구체적으로
+
+마크다운 문법(#, **, - 등)을 쓰지 말고 순수 텍스트 문장으로만 작성하세요."""
+
+_REPORT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "overall_grade": {
+            "type": "string",
+            "enum": ["good", "normal", "needs_improvement"],
+        },
+        "overall_comment": {"type": "string"},
+        "strengths": {"type": "array", "items": {"type": "string"}},
+        "improvements": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["overall_grade", "overall_comment", "strengths", "improvements"],
+    "additionalProperties": False,
+}
 
 SCORE_SYSTEM_PROMPT = """\
 당신은 임상 커뮤니케이션 교육 평가자입니다.
@@ -97,18 +117,19 @@ def generate_patient_reply(persona: str, history: list[dict], user_text: str) ->
     return _extract_text(response)
 
 
-def generate_coaching_feedback(transcript: str, prosody_summary_kr: str) -> str:
-    prompt = f"""[발화 내용]
+def generate_session_report(transcript: str, scores_summary: str) -> dict:
+    prompt = f"""[대화 전체 전사]
 {transcript}
 
-[음향 분석 요약]
-{prosody_summary_kr}
+[발화별 점수]
+{scores_summary}
 """
     response = client.messages.create(
         model=MODEL,
-        max_tokens=400,
+        max_tokens=600,
         thinking={"type": "disabled"},
-        system=COACH_SYSTEM_PROMPT,
+        system=REPORT_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": prompt}],
+        output_config={"format": {"type": "json_schema", "schema": _REPORT_SCHEMA}},
     )
-    return _extract_text(response)
+    return json.loads(_extract_text(response))
