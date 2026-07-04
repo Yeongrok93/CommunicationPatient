@@ -5,8 +5,9 @@ import os
 import tempfile
 import uuid
 
-from fastapi import FastAPI, Form, HTTPException, UploadFile
+from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from . import audio_utils, llm, prosody, tts, whisper_stt
@@ -22,6 +23,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    # 처리되지 않은 예외가 그대로 전파되면 Starlette의 기본 500 응답에는
+    # CORSMiddleware가 헤더를 못 붙여서 브라우저에 "Failed to fetch"로만 보임.
+    # 여기서 잡아 정상적으로 반환하면 CORS 헤더가 제대로 붙는다.
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "서버 내부 오류가 발생했습니다. 잠시 후 다시 시도해주세요."},
+    )
 
 TMP_DIR = os.path.join(tempfile.gettempdir(), "comm_mic_audio")
 os.makedirs(TMP_DIR, exist_ok=True)

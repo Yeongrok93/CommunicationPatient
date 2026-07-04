@@ -129,7 +129,7 @@ def generate_session_report(transcript: str, scores_summary: str) -> dict:
 """
     response = client.messages.create(
         model=MODEL,
-        max_tokens=600,
+        max_tokens=1500,
         thinking={"type": "disabled"},
         system=REPORT_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": prompt}],
